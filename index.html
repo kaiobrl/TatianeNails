@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agendamento Online de Manicures</title>
+    <!-- Carrega o Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Carrega a fonte Inter do Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Script Principal -->
+    <script type="module">
+        // --- Configuração do LocalStorage ---
+        const STORAGE_KEY = 'appointments';
+        let allAppointments = []; // Lista local para agendamentos
+        let selectedDate = null;
+        let selectedTime = null;
+        let selectedManicure = null;
+        let currentDate = new Date();
+        currentDate.setDate(1); // Começa no primeiro dia do mês
+
+        // Dados de exemplo para manicures e horários
+        const manicures = [
+            { id: "Karina", nome: "Karina Costa", especialidade: "Unhas em gel" },
+            { id: "maria", nome: "Maria Santos", especialidade: "Nail Art e Decorações" },
+            { id: "julia", nome: "Julia Oliveira", especialidade: "Manicure Tradicional" },
+            { id: "carol", nome: "Carolina Lima", especialidade: "Alongamento em Fibra" },
+            { id: "beatriz", nome: "Beatriz Costa", especialidade: "Unhas em Porcelana" },
+            { id: "patricia", nome: "Patricia Souza", especialidade: "Nail Design Artístico" }
+        ];
+
+        const timeSlotsAvailable = [
+            "09:00", "10:00", "11:00", "12:00", 
+            "14:00", "15:00", "16:00", "17:00"
+        ];
+
+        const SALON_WHATSAPP_NUMBER = "5583981374944"; // <-- ADICIONE O NÚMERO DO SALÃO AQUI (ex: 5521999998888)
+
+        // --- Funções do LocalStorage ---
+        function saveAppointments(appointments) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(appointments));
+        }
+
+        function getAppointments() {
+            const stored = localStorage.getItem(STORAGE_KEY);
+            return stored ? JSON.parse(stored) : [];
+        }
+
+        // --- Elementos DOM ---
+        const getElement = (id) => document.getElementById(id);
+
+        // --- Função Principal de Inicialização ---
+        function initApp() {
+            // Esconde o spinner de carregamento
+            getElement("loadingSpinner").classList.add("hidden");
+            getElement("appContainer").classList.remove("hidden");
+
+            // Configura os botões de troca de visualização
+            setupViewToggles();
+            
+            // Renderiza os componentes iniciais
+            renderManicures();
+            renderCalendar();
+
+            // Adiciona ouvintes de eventos
+            getElement("prevMonth").addEventListener("click", changeMonth.bind(null, -1));
+            getElement("nextMonth").addEventListener("click", changeMonth.bind(null, 1));
+            getElement("bookingForm").addEventListener("submit", handleBookingSubmit);
+            getElement("closeModal").addEventListener("click", closeModal);
+            getElement("adminDateFilter").addEventListener("change", renderAdminList);
+
+            // Inicializa a lista de agendamentos
+            allAppointments = getAppointments();
+        }
+
+        // --- Lógica de Visualização ---
+        function setupViewToggles() {
+            const clientViewBtn = getElement("clientViewBtn");
+            const adminViewBtn = getElement("adminViewBtn");
+            const clientView = getElement("clientView");
+            const adminView = getElement("adminView");
+
+            clientViewBtn.addEventListener("click", () => {
+                clientView.classList.remove("hidden");
+                adminView.classList.add("hidden");
+                clientViewBtn.classList.add("bg-pink-600", "text-white");
+                adminViewBtn.classList.remove("bg-pink-600", "text-white");
+            });
+
+            adminViewBtn.addEventListener("click", () => {
+                clientView.classList.add("hidden");
+                adminView.classList.remove("hidden");
+                adminViewBtn.classList.add("bg-pink-600", "text-white");
+                clientViewBtn.classList.remove("bg-pink-600", "text-white");
+                renderAdminList(); // Atualiza a lista de admin ao trocar
+            });
+        }
+
+        // --- Renderização dos Componentes da UI ---
+
+        // Renderiza as opções de manicure (PRD 2.2)
+        function renderManicures() {
+            const container = getElement("manicureSelection");
+            container.innerHTML = "";
+            manicures.forEach(manicure => {
+                const div = document.createElement("div");
+                div.className = "p-4 border rounded-lg cursor-pointer hover:border-pink-500 transition-all";
+                div.dataset.id = manicure.id;
+                div.innerHTML = `
+                    <h4 class="font-semibold text-lg">${manicure.nome}</h4>
+                    <p class="text-sm text-gray-400">${manicure.especialidade}</p>
+                `;
+                div.addEventListener("click", () => {
+                    selectedManicure = manicure.id;
+                    // Atualiza a seleção visual
+                    Array.from(container.children).forEach(child => {
+                        child.classList.remove("border-pink-500", "bg-pink-900/50");
+                    });
+                    div.classList.add("border-pink-500", "bg-pink-900/50");
+                    console.log("Manicure selecionada:", selectedManicure);
+                    renderTimeSlots();
+                });
+                container.appendChild(div);
+            });
+        }
+
+        // Renderiza o calendário (PRD 2.1)
+        function renderCalendar() {
+            const calendarGrid = getElement("calendarGrid");
+            const monthYear = getElement("monthYear");
+            calendarGrid.innerHTML = "";
+            
+            const month = currentDate.getMonth();
+            const year = currentDate.getFullYear();
+            
+            monthYear.textContent = `${currentDate.toLocaleString('pt-BR', { month: 'long' })} ${year}`;
+
+            const firstDay = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); // Zera a hora para comparação
+
+            // Adiciona células vazias para o início do mês
+            for (let i = 0; i < firstDay; i++) {
+                calendarGrid.appendChild(document.createElement("div"));
+            }
+
+            // Adiciona os dias do mês
+            for (let day = 1; day <= daysInMonth; day++) {
+                const cell = document.createElement("div");
+                cell.className = "p-2 h-12 flex items-center justify-center rounded-full cursor-pointer transition-all";
+                cell.textContent = day;
+                
+                const cellDate = new Date(year, month, day);
+                cellDate.setHours(0, 0, 0, 0);
+
+                if (cellDate < today) {
+                    // Dias passados
+                    cell.classList.add("text-gray-600", "cursor-not-allowed");
+                } else {
+                    // Dias futuros e hoje
+                    cell.classList.add("hover:bg-pink-700");
+                    cell.addEventListener("click", () => {
+                        selectedDate = new Date(year, month, day);
+                        // Atualiza a seleção visual
+                        Array.from(calendarGrid.querySelectorAll(".bg-pink-600")).forEach(el => {
+                            el.classList.remove("bg-pink-600");
+                        });
+                        cell.classList.add("bg-pink-600");
+                        console.log("Data selecionada:", selectedDate.toISOString().split('T')[0]);
+                        renderTimeSlots();
+                    });
+                }
+                
+                // Marca o dia selecionado
+                if (selectedDate && cellDate.getTime() === selectedDate.getTime()) {
+                    cell.classList.add("bg-pink-600");
+                }
+                
+                calendarGrid.appendChild(cell);
+            }
+        }
+
+        // Muda o mês do calendário
+        function changeMonth(offset) {
+            currentDate.setMonth(currentDate.getMonth() + offset);
+            renderCalendar();
+        }
+
+        // Renderiza os horários disponíveis (PRD 2.1)
+        function renderTimeSlots() {
+            const container = getElement("timeSlots");
+            container.innerHTML = "";
+
+            if (!selectedDate || !selectedManicure) {
+                container.innerHTML = `<p class="text-gray-400 text-sm col-span-4">Por favor, selecione uma manicure e uma data.</p>`;
+                return;
+            }
+
+            const dateString = selectedDate.toISOString().split('T')[0];
+            
+            // Filtra os horários já agendados
+            const bookedSlots = allAppointments
+                .filter(app => app.date === dateString && app.manicureId === selectedManicure)
+                .map(app => app.time);
+
+            let availableCount = 0;
+            timeSlotsAvailable.forEach(time => {
+                const isBooked = bookedSlots.includes(time);
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.textContent = time;
+                btn.dataset.time = time;
+                
+                if (isBooked) {
+                    btn.className = "p-3 rounded-lg bg-gray-700 text-gray-500 cursor-not-allowed";
+                    btn.disabled = true;
+                } else {
+                    availableCount++;
+                    btn.className = "p-3 rounded-lg bg-gray-700 hover:bg-pink-600 transition-all";
+                    btn.addEventListener("click", () => {
+                        selectedTime = time;
+                        // Atualiza a seleção visual
+                        Array.from(container.querySelectorAll(".bg-pink-600")).forEach(el => {
+                            el.classList.remove("bg-pink-600");
+                        });
+                        btn.classList.add("bg-pink-600");
+                        console.log("Horário selecionado:", selectedTime);
+                    });
+                }
+                
+                // Marca o horário selecionado
+                if (selectedTime === time) {
+                    btn.classList.add("bg-pink-600");
+                }
+                
+                container.appendChild(btn);
+            });
+            
+            if(availableCount === 0) {
+                 container.innerHTML = `<p class="text-gray-400 text-sm col-span-4">Nenhum horário disponível para esta data e manicure.</p>`;
+            }
+        }
+
+        // --- Lógica de Agendamento (Formulário) ---
+
+        // Manipula o envio do formulário de agendamento (PRD 2.3, 3.4)
+        async function handleBookingSubmit(e) {
+            e.preventDefault();
+            
+            // Validação
+            if (!selectedDate || !selectedTime || !selectedManicure) {
+                showError("Por favor, selecione a manicure, a data e o horário.");
+                return;
+            }
+
+            const form = e.target;
+            const clientName = form.clientName.value;
+            const clientPhone = form.clientPhone.value;
+            const clientEmail = form.clientEmail.value;
+
+            if (!clientName || !clientPhone || !clientEmail) {
+                showError("Por favor, preencha todos os seus dados.");
+                return;
+            }
+
+            const manicureObj = manicures.find(m => m.id === selectedManicure);
+            const dateString = selectedDate.toISOString().split('T')[0];
+
+            const newAppointment = {
+                manicureId: selectedManicure,
+                manicureNome: manicureObj.nome,
+                date: dateString,
+                time: selectedTime,
+                clientName,
+                clientPhone,
+                clientEmail,
+                createdAt: new Date().toISOString(),
+                status: "confirmado"
+            };
+            
+            console.log("Novo agendamento:", newAppointment);
+            showLoading(true);
+
+            try {
+                // Adiciona ID único e salva no localStorage
+                newAppointment.id = Date.now().toString();
+                allAppointments.push(newAppointment);
+                saveAppointments(allAppointments);
+                console.log("Agendamento salvo com ID:", newAppointment.id);
+                
+                // Sucesso - (PRD 2.4, 3.5)
+                showConfirmationModal(newAppointment);
+                
+                // Reseta o formulário e seleções
+                form.reset();
+                selectedDate = null;
+                selectedTime = null;
+                selectedManicure = null;
+                renderCalendar();
+                renderTimeSlots();
+                renderManicures(); // Reseta a seleção visual das manicures
+
+            } catch (error) {
+                console.error("Erro ao salvar agendamento:", error);
+                showError("Erro ao salvar agendamento. Tente novamente.");
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // --- Lógica de Administração (PRD 2.5) ---
+
+        // Atualiza a visualização dos agendamentos
+        function updateAppointmentsView() {
+            // Ordena os agendamentos por data e hora
+            allAppointments.sort((a, b) => {
+                const dateTimeA = new Date(`${a.date}T${a.time}`);
+                const dateTimeB = new Date(`${b.date}T${b.time}`);
+                return dateTimeA - dateTimeB;
+            });
+            
+            // Re-renderiza as visualizações
+            renderAdminList();
+            renderTimeSlots();
+        }
+
+        // Renderiza a lista de agendamentos para o admin (PRD 6.6)
+        function renderAdminList() {
+            const container = getElement("appointmentList");
+            const filterDate = getElement("adminDateFilter").value;
+            container.innerHTML = "";
+
+            const filteredAppointments = allAppointments.filter(app => {
+                return !filterDate || app.date === filterDate;
+            });
+
+            if (filteredAppointments.length === 0) {
+                container.innerHTML = `<p class="text-gray-400">Nenhum agendamento encontrado${filterDate ? " para esta data" : ""}.</p>`;
+                return;
+            }
+
+            filteredAppointments.forEach(app => {
+                const div = document.createElement("div");
+                div.className = "bg-gray-800 p-4 rounded-lg shadow-md flex flex-wrap justify-between items-center";
+                
+                const dataFormatada = new Date(`${app.date}T00:00:00-03:00`).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+
+                div.innerHTML = `
+                    <div>
+                        <p class="text-lg font-semibold">${app.clientName}</p>
+                        <p class="text-sm text-pink-400">${app.manicureNome}</p>
+                        <p class="text-sm text-gray-300">${dataFormatada} às ${app.time}</p>
+                        <p class="text-sm text-gray-400">${app.clientPhone} | ${app.clientEmail}</p>
+                    </div>
+                    <button data-id="${app.id}" class="cancel-btn mt-4 sm:mt-0 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-all">
+                        Cancelar
+                    </button>
+                `;
+                container.appendChild(div);
+            });
+            
+            // Adiciona listener para botões de cancelar (delegação de evento)
+            container.querySelectorAll(".cancel-btn").forEach(btn => {
+                btn.addEventListener("click", handleCancelAppointment);
+            });
+        }
+        
+        // Manipula o cancelamento de um agendamento
+        async function handleCancelAppointment(e) {
+            const appointmentId = e.target.dataset.id;
+            
+            // Confirmação customizada (substitui window.confirm)
+            if (!await showConfirm("Tem certeza que deseja cancelar este agendamento?")) {
+                return;
+            }
+
+            showLoading(true);
+            try {
+                // Remove o agendamento do array e atualiza o localStorage
+                allAppointments = allAppointments.filter(app => app.id !== appointmentId);
+                saveAppointments(allAppointments);
+                console.log("Agendamento cancelado:", appointmentId);
+                updateAppointmentsView();
+            } catch (error) {
+                console.error("Erro ao cancelar agendamento:", error);
+                showError("Erro ao cancelar agendamento.");
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        // --- Funções Utilitárias (Modais, Erros) ---
+        
+        function showLoading(isLoading) {
+            const spinner = getElement("loadingSpinner");
+            spinner.classList.toggle("hidden", !isLoading);
+        }
+
+        function showError(message) {
+            // Implementação simples de um "alert" customizado
+            const errorToast = getElement("errorToast");
+            errorToast.textContent = message;
+            errorToast.classList.remove("hidden");
+            setTimeout(() => {
+                errorToast.classList.add("hidden");
+            }, 3000);
+        }
+        
+        // Mostra um modal de confirmação (substituto do window.alert/confirm)
+        function showConfirm(message) {
+            return new Promise((resolve) => {
+                const modal = getElement("confirmModal");
+                getElement("confirmModalMessage").textContent = message;
+                modal.classList.remove("hidden");
+
+                getElement("confirmModalYes").onclick = () => {
+                    modal.classList.add("hidden");
+                    resolve(true);
+                };
+                getElement("confirmModalNo").onclick = () => {
+                    modal.classList.add("hidden");
+                    resolve(false);
+                };
+            });
+        }
+        
+        // Mostra o modal de confirmação de agendamento (PRD 6.5)
+        function showConfirmationModal(app) {
+            const modal = getElement("confirmationModal");
+            const details = getElement("modalDetails");
+            
+            // Formata a data (de YYYY-MM-DD para DD/MM/YYYY)
+            const [year, month, day] = app.date.split('-');
+            const dataFormatada = `${day}/${month}/${year}`;
+            
+            details.innerHTML = `
+                <p><strong>Cliente:</strong> ${app.clientName}</p>
+                <p><strong>Manicure:</strong> ${app.manicureNome}</p>
+                <p><strong>Data:</strong> ${dataFormatada}</p>
+                <p><strong>Horário:</strong> ${app.time}</p>
+                <p class="mt-4 text-sm text-gray-300">Continue clicando em enviar para WhatsApp ${app.clientEmail}.</p>
+            `;
+
+            // --- Nova Lógica do WhatsApp ---
+            let text = `Olá! 👋 Gostaria de confirmar meu agendamento:\n\n` +
+                       `*Cliente:* ${app.clientName}\n` +
+                       `*Manicure:* ${app.manicureNome}\n` +
+                       `*Data:* ${dataFormatada}\n` +
+                       `*Horário:* ${app.time}\n\n` +
+                       `Aguardo a confirmação. Obrigada!`;
+
+            const whatsappUrl = `https://wa.me/${SALON_WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`;
+            
+            // Adiciona o botão do WhatsApp ao modal
+            const whatsappBtn = getElement("whatsappBtn");
+            whatsappBtn.href = whatsappUrl; // Define o link
+            whatsappBtn.classList.remove("hidden"); // Mostra o botão
+
+            modal.classList.remove("hidden");
+        }
+        
+        function closeModal() {
+            getElement("confirmationModal").classList.add("hidden");
+            getElement("whatsappBtn").classList.add("hidden"); // Reseta o botão
+        }
+        
+        // Inicia a aplicação quando o DOM estiver carregado
+        document.addEventListener("DOMContentLoaded", initApp);
+
+    </script>
+    
+    <!-- Estilos CSS Customizados e Configuração do Tailwind -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Customiza o spinner de carregamento */
+        .spinner {
+            border-top-color: #ec4899; /* pink-500 */
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+
+<body class="bg-gray-900 text-white">
+
+    <!-- Container Principal da Aplicação -->
+    <div id="appContainer" class="max-w-6xl mx-auto p-4 md:p-8 hidden">
+        
+        <!-- Cabeçalho -->
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-pink-400">Agendamento</h1>
+            <p class="text-lg text-gray-300">Bem-vinda ao nosso salão!</p>
+        </header>
+
+        <!-- Apresentação da Dona do Salão -->
+        <div class="text-center mb-12">
+            <div class="relative w-48 h-48 mx-auto mb-4">
+                <img 
+                    src="./1.png" 
+                    alt="Foto da Proprietária do Salão" 
+                    class="rounded-full w-full h-full object-cover border-4 border-pink-500 shadow-lg"
+                >
+            </div>
+            <h2 class="text-2xl font-semibold text-pink-400 mb-2">KARINA COSTA</h2>
+            <p class="text-gray-300">Proprietária e Especialista em Unhas</p>
+            <p class="text-gray-400 text-sm mt-2 max-w-2xl mx-auto">
+                Com mais de 10 anos de experiência, dedico-me a oferecer o melhor serviço 
+                de manicure e cuidados com as unhas para nossas clientes.
+            </p>
+        </div>
+
+        <!-- Botões de Troca de Visualização (Cliente/Admin) -->
+        <div class="flex justify-center space-x-4 mb-8">
+            <button id="clientViewBtn" class="py-2 px-6 rounded-lg font-semibold bg-pink-600 text-white transition-all">
+                Agendar Horário
+            </button>
+            <button id="adminViewBtn" class="py-2 px-6 rounded-lg font-semibold bg-gray-700 hover:bg-gray-600 transition-all">
+                Ver Agendamentos (Admin)
+            </button>
+        </div>
+
+        <!-- Visualização do Cliente (Agendamento) -->
+        <main id="clientView" class="">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                
+                <!-- Coluna da Esquerda (Seleção) -->
+                <div class="lg:col-span-2 space-y-8">
+                    
+                    <!-- Passo 1: Escolha de Manicure (PRD 2.2) -->
+                    <section class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                        <h2 class="text-2xl font-semibold mb-4 border-b border-gray-700 pb-2">Passo 1: Escolha sua Manicure</h2>
+                        <div id="manicureSelection" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <!-- Manicures são renderizadas pelo JS -->
+                        </div>
+                    </section>
+
+                    <!-- Passo 2: Seleção de Data e Hora (PRD 2.1) -->
+                    <section class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                        <h2 class="text-2xl font-semibold mb-4 border-b border-gray-700 pb-2">Passo 2: Escolha a Data e Hora</h2>
+                        
+                        <!-- Calendário -->
+                        <div class="mb-6">
+                            <div class="flex justify-between items-center mb-4">
+                                <button id="prevMonth" class="p-2 rounded-full hover:bg-gray-700 transition-all">
+                                    &lt;
+                                </button>
+                                <h3 id="monthYear" class="text-xl font-semibold"></h3>
+                                <button id="nextMonth" class="p-2 rounded-full hover:bg-gray-700 transition-all">
+                                    &gt;
+                                </button>
+                            </div>
+                            <div class="grid grid-cols-7 gap-1 text-center mb-2">
+                                <span class="text-xs text-gray-400">Dom</span>
+                                <span class="text-xs text-gray-400">Seg</span>
+                                <span class="text-xs text-gray-400">Ter</span>
+                                <span class="text-xs text-gray-400">Qua</span>
+                                <span class="text-xs text-gray-400">Qui</span>
+                                <span class="text-xs text-gray-400">Sex</span>
+                                <span class="text-xs text-gray-400">Sáb</span>
+                            </div>
+                            <div id="calendarGrid" class="grid grid-cols-7 gap-1 text-center">
+                                <!-- Dias do calendário são renderizados pelo JS -->
+                            </div>
+                        </div>
+                        
+                        <!-- Horários -->
+                        <div>
+                            <h3 class="text-xl font-semibold mb-4">Horários Disponíveis</h3>
+                            <div id="timeSlots" class="grid grid-cols-4 gap-3">
+                                <!-- Horários são renderizados pelo JS -->
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- Coluna da Direita (Formulário) -->
+                <aside class="lg:col-span-1">
+                    <section class="bg-gray-800 p-6 rounded-lg shadow-lg sticky top-8">
+                        <h2 class="text-2xl font-semibold mb-4 border-b border-gray-700 pb-2">Passo 3: Seus Dados</h2>
+                        <!-- Formulário de Cadastro (PRD 2.3) -->
+                        <form id="bookingForm" class="space-y-4">
+                            <div>
+                                <label for="clientName" class="block text-sm font-medium text-gray-300 mb-1">Nome Completo</label>
+                                <input type="text" id="clientName" name="clientName" required class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:border-pink-500 focus:ring-pink-500 outline-none">
+                            </div>
+                            <div>
+                                <label for="clientPhone" class="block text-sm font-medium text-gray-300 mb-1">Telefone (WhatsApp)</label>
+                                <input type="tel" id="clientPhone" name="clientPhone" required class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:border-pink-500 focus:ring-pink-500 outline-none" placeholder="(XX) XXXXX-XXXX">
+                            </div>
+                            <div>
+                                <label for="clientEmail" class="block text-sm font-medium text-gray-300 mb-1">Email</label>
+                                <input type="email" id="clientEmail" name="clientEmail" required class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:border-pink-500 focus:ring-pink-500 outline-none" placeholder="seuemail@exemplo.com">
+                            </div>
+                            <button type="submit" class="w-full bg-pink-600 hover:bg-pink-700 text-white font-bold py-3 px-4 rounded-lg transition-all text-lg">
+                                Confirmar Agendamento
+                            </button>
+                        </form>
+                    </section>
+                </aside>
+            </div>
+        </main>
+
+        <!-- Visualização do Admin (Gerenciamento) -->
+        <section id="adminView" class="hidden">
+            <div class="bg-gray-800 p-6 rounded-lg shadow-lg max-w-4xl mx-auto">
+                <h2 class="text-2xl font-semibold mb-4 border-b border-gray-700 pb-2">Gerenciamento de Agendamentos</h2>
+                
+                <!-- Filtro de Data -->
+                <div class="mb-4">
+                    <label for="adminDateFilter" class="block text-sm font-medium text-gray-300 mb-1">Filtrar por data:</label>
+                    <input type="date" id="adminDateFilter" class="p-2 rounded-lg bg-gray-700 border border-gray-600 text-white">
+                </div>
+                
+                <!-- Lista de Agendamentos (PRD 6.6) -->
+                <div id="appointmentList" class="space-y-4">
+                    <!-- Agendamentos são renderizados pelo JS -->
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- Spinner de Carregamento Global -->
+    <div id="loadingSpinner" class="fixed inset-0 flex items-center justify-center bg-gray-900 bg-opacity-75 z-50">
+        <div class="spinner w-16 h-16 border-4 border-gray-600 rounded-full"></div>
+    </div>
+    
+    <!-- Toast de Erro (Substituto do alert) -->
+    <div id="errorToast" class="hidden fixed bottom-4 right-4 bg-red-600 text-white p-4 rounded-lg shadow-lg z-50">
+        <!-- Mensagem de erro aqui -->
+    </div>
+    
+    <!-- Modal de Confirmação (Substituto do alert) (PRD 6.5) -->
+    <div id="confirmationModal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-40 p-4">
+        <div class="bg-gray-800 p-8 rounded-lg shadow-2xl max-w-md w-full text-center">
+            <h3 class="text-2xl font-bold text-pink-400 mb-4">Agendamento Confirmado!</h3>
+            <div id="modalDetails" class="text-left space-y-2 mb-6">
+                <!-- Detalhes do agendamento injetados pelo JS -->
+            </div>
+            
+            <!-- Botão WhatsApp Adicionado -->
+            <a id="whatsappBtn" href="#" target="_blank" class="hidden w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg transition-all text-lg mt-4 flex items-center justify-center space-x-2">
+                <!-- Ícone SVG simples do WhatsApp -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="bi bi-whatsapp" viewBox="0 0 16 16">
+                  <path d="M13.601 2.326A7.854 7.854 0 0 0 7.994 0C3.627 0 .068 3.558.064 7.926c0 1.399.366 2.76 1.057 3.965L0 16l4.204-1.102a7.933 7.933 0 0 0 3.79.965h.004c4.368 0 7.926-3.558 7.93-7.93A7.898 7.898 0 0 0 13.6 2.326zM7.994 14.521a6.573 6.573 0 0 1-3.356-.92l-.24-.144-2.494.654.666-2.433-.156-.251a6.56 6.56 0 0 1-1.007-3.505c0-3.626 2.957-6.584 6.591-6.584a6.56 6.56 0 0 1 4.66 1.931 6.557 6.557 0 0 1 1.928 4.66c-.004 3.626-2.957 6.584-6.591 6.584zm3.615-4.934c-.197-.099-1.17-.578-1.353-.646-.182-.065-.315-.099-.445.099-.133.197-.513.646-.627.775-.114.133-.232.148-.43.05-.197-.1-.836-.308-1.592-.985-.59-.525-.985-1.175-1.103-1.372-.114-.198-.011-.304.088-.403.087-.088.197-.232.296-.346.1-.114.133-.198.198-.33.065-.134.034-.248-.015-.347-.05-.099-.445-1.076-.612-1.47-.16-.389-.323-.335-.445-.34-.114-.007-.247-.007-.38-.007a.729.729 0 0 0-.529.247c-.182.198-.691.677-.691 1.654 0 .977.71 1.916.81 2.049.098.133 1.394 2.132 3.383 2.992.47.205.84.326 1.129.418.475.152.904.129 1.246.08.38-.058 1.171-.48 1.338-.943.164-.464.164-.86.114-.943-.049-.084-.182-.133-.38-.232z"/>
+                </svg>
+                <span>Enviar no WhatsApp</span>
+            </a>
+
+            <button id="closeModal" class="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-all mt-2">
+                Fechar
+            </button>
+        </div>
+    </div>
+    
+    <!-- Modal de Confirmação (Substituto do window.confirm) -->
+    <div id="confirmModal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+        <div class="bg-gray-800 p-8 rounded-lg shadow-2xl max-w-md w-full text-center">
+            <h3 id="confirmModalMessage" class="text-xl font-semibold mb-6">Tem certeza?</h3>
+            <div class="flex justify-center space-x-4">
+                <button id="confirmModalNo" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-6 rounded-lg transition-all">
+                    Não
+                </button>
+                <button id="confirmModalYes" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg transition-all">
+                    Sim
+                </button>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
+
